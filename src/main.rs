@@ -4,7 +4,7 @@
 use crossbeam::atomic::AtomicCell;
 use pc_keyboard::DecodedKey;
 use pluggable_interrupt_os::{vga_buffer::clear_screen, HandlerTable};
-use pluggable_interrupt_template::LetterMover;
+use csci320_project6::SpaceDebrisGame;
 
 #[no_mangle]
 pub extern "C" fn _start() -> ! {
@@ -20,15 +20,15 @@ static LAST_KEY: AtomicCell<Option<DecodedKey>> = AtomicCell::new(None);
 static TICKED: AtomicCell<bool> = AtomicCell::new(false);
 
 fn cpu_loop() -> ! {
-    let mut kernel = LetterMover::default();
+    let mut game = SpaceDebrisGame::default();
     loop {
         if let Ok(_) = TICKED.compare_exchange(true, false) {
-            kernel.tick();
+            game.tick();
         }
         
         if let Ok(k) = LAST_KEY.fetch_update(|k| if k.is_some() {Some(None)} else {None}) {
             if let Some(k) = k {
-                kernel.key(k);
+                game.key(k);
             }
         }
     }
