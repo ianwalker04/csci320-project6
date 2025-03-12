@@ -14,6 +14,7 @@
 
 use num::Integer;
 use pc_keyboard::{DecodedKey, KeyCode};
+use pluggable_interrupt_os::println;
 use pluggable_interrupt_os::vga_buffer::{
     plot, Color, ColorCode, BUFFER_HEIGHT, BUFFER_WIDTH,
 };
@@ -25,11 +26,22 @@ use core::{
     prelude::rust_2024::derive,
 };
 
+const DEBRIS_COLORS: [Color; 13] = [Color::Blue, Color::Green, Color::Cyan, Color::Red, Color::Magenta,
+                                    Color::LightGray, Color::LightBlue, Color::LightGreen, Color::LightCyan,
+                                    Color::LightRed, Color::Pink, Color::Yellow, Color::White];
+
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub enum GameStatus {
+    GameRunning,
+    GameOver
+}
+
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct SpaceDebrisGame {
     player: Player,
     debris: Debris,
-    score: u32
+    score: u32,
+    game_status: GameStatus
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -64,7 +76,8 @@ impl Default for SpaceDebrisGame {
         Self {
             player: Player::default(),
             debris: Debris::default(),
-            score: 0
+            score: 0,
+            game_status: GameStatus::GameRunning
         }
     }
 }
@@ -87,6 +100,37 @@ impl Default for Debris {
             dx: 1,
             color: Color::White
         }
+    }
+}
+
+impl SpaceDebrisGame {
+    pub fn update(&mut self) {
+        self.player.tick();
+        self.debris.tick();
+    }
+
+    pub fn key(&mut self, key: DecodedKey) {
+        self.player.key(key);
+    }
+
+    pub fn change_status(&mut self, status: GameStatus) {
+        self.game_status = status;
+    }
+
+    pub fn increment_score(&mut self) {
+        self.score += 1;
+    }
+
+    pub fn status(&self) -> GameStatus {
+        self.game_status
+    }
+
+    pub fn score(&self) -> u32 {
+        self.score
+    }
+
+    pub fn player_location(&self) -> (usize, usize) {
+        (self.player.row, self.player.col)
     }
 }
 
@@ -149,7 +193,14 @@ impl Debris {
     }
 
     fn update_location(&mut self) {
-        self.col = add1::<BUFFER_WIDTH>(self.col);
+        self.col = sub1::<BUFFER_WIDTH>(self.col);
+        if self.col == 18 {
+            // Increment score
+        }
+        if self.col == 0 {
+            // Destroy debris
+            println!("Debris deleted.");
+        }
     }
 
     fn draw_current(&self) {

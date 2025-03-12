@@ -23,7 +23,7 @@ fn cpu_loop() -> ! {
     let mut game = SpaceDebrisGame::default();
     loop {
         if let Ok(_) = TICKED.compare_exchange(true, false) {
-            game.tick();
+            game.update();
         }
         
         if let Ok(k) = LAST_KEY.fetch_update(|k| if k.is_some() {Some(None)} else {None}) {
