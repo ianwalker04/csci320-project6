@@ -35,7 +35,8 @@ pub enum DebrisStatus {
 pub struct SpaceDebrisGame {
     player: Player,
     debris: Debris,
-    score: u32
+    score: u32,
+    spawn_countdown: u32
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -71,8 +72,9 @@ impl Default for SpaceDebrisGame {
     fn default() -> Self {
         Self {
             player: Player::default(),
-            debris: Debris::default(),
-            score: 0
+            debris: Debris::new(),
+            score: 0,
+            spawn_countdown: 50
         }
     }
 }
@@ -88,8 +90,8 @@ impl Default for Player {
     }
 }
 
-impl Default for Debris {
-    fn default() -> Self {
+impl Debris {
+    pub fn new() -> Self {
         Self {
             col: BUFFER_WIDTH / 2,
             row: BUFFER_HEIGHT / 2,
@@ -102,9 +104,6 @@ impl Default for Debris {
 
 impl SpaceDebrisGame {
     pub fn update(&mut self) {
-        if self.player.col == self.debris.col && self.player.row == self.debris.row {
-            self.player.game_status = GameStatus::GameOver;
-        }
         if let Some(event) = self.player.tick() {
             match event {
                 GameStatus::GameRunning => {},
@@ -114,19 +113,29 @@ impl SpaceDebrisGame {
                 }
             }
         }
-        if let Some(event) = self.debris.tick() {
+        if let Some(event) = self.debris.tick(&mut self.player) {
             match event {
                 DebrisStatus::ScorePoint => self.increment_score(),
                 DebrisStatus::Destroy => {
-                    self.debris = Debris::default();
+                    // Destroy debris
+                    self.debris = Debris::new();
                 },
                 DebrisStatus::Normal => {}
             }
         }
+        self.create_debris();
     }
 
     pub fn initialize(&mut self) {
         self.display_score();
+    }
+
+    pub fn create_debris(&mut self) {
+        if self.spawn_countdown == 0 {
+            // Spawn debris
+        } else {
+            self.spawn_countdown -= 1;
+        }
     }
 
     pub fn key(&mut self, key: DecodedKey) {
@@ -189,6 +198,10 @@ impl Player {
         }
     }
 
+    fn collide(&mut self) {
+        self.game_status = GameStatus::GameOver;
+    }
+
     fn draw_current(&self) {
         if self.game_status == GameStatus::GameRunning {
             plot(
@@ -229,9 +242,12 @@ impl Player {
 }
 
 impl Debris {
-    pub fn tick(&mut self) -> Option<DebrisStatus> {
+    pub fn tick(&mut self, player: &mut Player) -> Option<DebrisStatus> {
         self.clear_current();
         self.update_location();
+        if self.col == player.col && self.row == player.row {
+            player.collide();
+        }
         self.draw_current();
         if self.col == 18 {
             return Some(DebrisStatus::ScorePoint);
