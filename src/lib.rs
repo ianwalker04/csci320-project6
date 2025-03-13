@@ -1,6 +1,8 @@
 #![no_std]
 
 use num::Integer;
+use heapless::Vec;
+use oorandom::{self, Rand32};
 use pc_keyboard::{DecodedKey, KeyCode};
 use pluggable_interrupt_os::println;
 use pluggable_interrupt_os::vga_buffer::{
@@ -31,12 +33,13 @@ pub enum DebrisStatus {
     Destroy
 }
 
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct SpaceDebrisGame {
     player: Player,
-    debris: Debris,
+    debris: Vec<Debris, 10>,
     score: u32,
-    spawn_countdown: u32
+    spawn_countdown: u32,
+    seed: u32,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -72,9 +75,10 @@ impl Default for SpaceDebrisGame {
     fn default() -> Self {
         Self {
             player: Player::default(),
-            debris: Debris::new(),
+            debris: Vec::new(),
             score: 0,
-            spawn_countdown: 50
+            spawn_countdown: 50,
+            seed: 7264
         }
     }
 }
@@ -91,12 +95,14 @@ impl Default for Player {
 }
 
 impl Debris {
-    pub fn new() -> Self {
+    pub fn new(num: u32) -> Self {
+        let seed: u32 = num % 100;
+        let mut rng: Rand32 = Rand32::new(seed.into());
         Self {
-            col: BUFFER_WIDTH / 2,
-            row: BUFFER_HEIGHT / 2,
+            col: BUFFER_WIDTH - 1,
+            row: rng.rand_range(0..(BUFFER_HEIGHT - 1) as u32) as usize,
             dx: 1,
-            color: Color::White,
+            color: DEBRIS_COLORS[rng.rand_range(0..13) as usize],
             debris_status: DebrisStatus::Normal
         }
     }
@@ -113,16 +119,28 @@ impl SpaceDebrisGame {
                 }
             }
         }
-        if let Some(event) = self.debris.tick(&mut self.player) {
-            match event {
-                DebrisStatus::ScorePoint => self.increment_score(),
-                DebrisStatus::Destroy => {
-                    // Destroy debris
-                    self.debris = Debris::new();
-                },
-                DebrisStatus::Normal => {}
+        for (i, mut debris) in self.debris.clone().into_iter().enumerate() {
+            if let Some(event) = debris.tick(&mut self.player) {
+                match event {
+                    DebrisStatus::ScorePoint => self.increment_score(),
+                    DebrisStatus::Destroy => {
+                        self.debris.remove(i);
+                        continue;
+                    },
+                    DebrisStatus::Normal => {}
+                }
             }
         }
+        // if let Some(event) = self.debris.tick(&mut self.player) {
+        //     match event {
+        //         DebrisStatus::ScorePoint => self.increment_score(),
+        //         DebrisStatus::Destroy => {
+        //             // Destroy debris
+        //             self.debris = Debris::new();
+        //         },
+        //         DebrisStatus::Normal => {}
+        //     }
+        // }
         self.create_debris();
     }
 
@@ -132,10 +150,17 @@ impl SpaceDebrisGame {
 
     pub fn create_debris(&mut self) {
         if self.spawn_countdown == 0 {
-            // Spawn debris
+            let seed: u32 = self.generate_seed();
+            let _ = self.debris.push(Debris::new(seed));
+            self.spawn_countdown = 50;
         } else {
             self.spawn_countdown -= 1;
         }
+    }
+
+    pub fn generate_seed(&mut self) -> u32 {
+        self.seed = self.seed.wrapping_mul(1664525).wrapping_add(1013904223);
+        self.seed as u32
     }
 
     pub fn key(&mut self, key: DecodedKey) {
@@ -171,6 +196,8 @@ impl SpaceDebrisGame {
         clear_row(0, Color::Black);
         clear_row(1, Color::Black);
         self.score = 0;
+        self.player.row = BUFFER_HEIGHT / 2;
+        self.player.col = BUFFER_WIDTH / 4;
         self.initialize();
     }
 }
