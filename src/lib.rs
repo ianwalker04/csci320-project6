@@ -4,7 +4,6 @@ use num::Integer;
 use heapless::Vec;
 use oorandom::{self, Rand32};
 use pc_keyboard::{DecodedKey, KeyCode};
-use pluggable_interrupt_os::println;
 use pluggable_interrupt_os::vga_buffer::{
     plot, Color, ColorCode, BUFFER_HEIGHT, BUFFER_WIDTH, plot_str, plot_num, clear_row
 };
@@ -39,7 +38,7 @@ pub struct SpaceDebrisGame {
     debris: Vec<Debris, 10>,
     score: u32,
     spawn_countdown: u32,
-    seed: u32,
+    seed_count: u32
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -78,7 +77,7 @@ impl Default for SpaceDebrisGame {
             debris: Vec::new(),
             score: 0,
             spawn_countdown: 50,
-            seed: 7264
+            seed_count: 0
         }
     }
 }
@@ -96,11 +95,10 @@ impl Default for Player {
 
 impl Debris {
     pub fn new(num: u32) -> Self {
-        let seed: u32 = num % 100;
-        let mut rng: Rand32 = Rand32::new(seed.into());
+        let mut rng: Rand32 = Rand32::new(num.into());
         Self {
             col: BUFFER_WIDTH - 1,
-            row: rng.rand_range(0..(BUFFER_HEIGHT - 1) as u32) as usize,
+            row: rng.rand_range(0..(BUFFER_HEIGHT - 5) as u32) as usize,
             dx: 1,
             color: DEBRIS_COLORS[rng.rand_range(0..13) as usize],
             debris_status: DebrisStatus::Normal
@@ -110,6 +108,7 @@ impl Debris {
 
 impl SpaceDebrisGame {
     pub fn update(&mut self) {
+        self.seed_count += 1;
         if let Some(event) = self.player.tick() {
             match event {
                 GameStatus::GameRunning => {},
@@ -119,28 +118,21 @@ impl SpaceDebrisGame {
                 }
             }
         }
-        for (i, mut debris) in self.debris.clone().into_iter().enumerate() {
-            if let Some(event) = debris.tick(&mut self.player) {
+        let mut deleted_debris: Vec<usize, 10> = Vec::<usize, 10>::new();
+        for i in 0..self.debris.len() {
+            if let Some(event) = self.debris[i].tick(&mut self.player) {
                 match event {
                     DebrisStatus::ScorePoint => self.increment_score(),
                     DebrisStatus::Destroy => {
-                        self.debris.remove(i);
-                        continue;
+                        let _ = deleted_debris.push(i);
                     },
                     DebrisStatus::Normal => {}
                 }
             }
         }
-        // if let Some(event) = self.debris.tick(&mut self.player) {
-        //     match event {
-        //         DebrisStatus::ScorePoint => self.increment_score(),
-        //         DebrisStatus::Destroy => {
-        //             // Destroy debris
-        //             self.debris = Debris::new();
-        //         },
-        //         DebrisStatus::Normal => {}
-        //     }
-        // }
+        for &debris in deleted_debris.iter().rev() {
+            self.debris.remove(debris);
+        }
         self.create_debris();
     }
 
@@ -149,18 +141,13 @@ impl SpaceDebrisGame {
     }
 
     pub fn create_debris(&mut self) {
+        self.seed_count += 1;
         if self.spawn_countdown == 0 {
-            let seed: u32 = self.generate_seed();
-            let _ = self.debris.push(Debris::new(seed));
-            self.spawn_countdown = 50;
+            let _ = self.debris.push(Debris::new(self.seed_count));
+            self.spawn_countdown = 10;
         } else {
             self.spawn_countdown -= 1;
         }
-    }
-
-    pub fn generate_seed(&mut self) -> u32 {
-        self.seed = self.seed.wrapping_mul(1664525).wrapping_add(1013904223);
-        self.seed as u32
     }
 
     pub fn key(&mut self, key: DecodedKey) {
@@ -173,8 +160,10 @@ impl SpaceDebrisGame {
     }
 
     pub fn increment_score(&mut self) {
-        self.score += 1;
-        self.display_score();
+        if self.player.game_status != GameStatus::GameOver {
+            self.score += 1;
+            self.display_score();
+        }
     }
 
     pub fn display_score(&self) {
@@ -182,19 +171,33 @@ impl SpaceDebrisGame {
         let score_text: &str = "Score: ";
         clear_row(0, Color::Black);
         plot_str(score_text, 0, 0, header_color);
-        plot_num(self.score as isize, score_text.len() + 1, 0, header_color);
+        plot_num(self.score as isize, score_text.len(), 0, header_color);
     }
 
     pub fn display_game_over(&self) {
-        let header_color: ColorCode = ColorCode::new(Color::Red, Color::Black);
+        let header_color_score: ColorCode = ColorCode::new(Color::White, Color::Black);
+        let header_color_gameover: ColorCode = ColorCode::new(Color::Red, Color::Black);
+        let final_score_text: &str = "Final Score: ";
         let game_over_text: &str = "Game over! Press R to restart.";
-        plot_str(game_over_text, 0, 1, header_color);
+        clear_row(0, Color::Black);
+        plot_str(final_score_text, 0, 0, header_color_score);
+        plot_num(self.score as isize, final_score_text.len(), 0, header_color_score);
+        plot_str(game_over_text, 0, 1, header_color_gameover);
     }
 
     pub fn reset(&mut self) {
         self.player.game_status = GameStatus::GameRunning;
+        self.player.clear_current();
         clear_row(0, Color::Black);
         clear_row(1, Color::Black);
+        let mut deleted_debris: Vec<usize, 10> = Vec::<usize, 10>::new();
+        for i in 0..self.debris.len() {
+            let _ = deleted_debris.push(i);
+            self.debris[i].clear_current();
+        }
+        for &debris in deleted_debris.iter().rev() {
+            self.debris.remove(debris);
+        }
         self.score = 0;
         self.player.row = BUFFER_HEIGHT / 2;
         self.player.col = BUFFER_WIDTH / 4;
@@ -280,6 +283,7 @@ impl Debris {
             return Some(DebrisStatus::ScorePoint);
         }
         if self.col == 0 {
+            self.clear_current();
             return Some(DebrisStatus::Destroy);
         }
         return Some(DebrisStatus::Normal);
