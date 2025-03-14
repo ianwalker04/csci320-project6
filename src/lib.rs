@@ -181,7 +181,6 @@ impl SpaceDebrisGame {
         let header_color_gameover: ColorCode = ColorCode::new(Color::Red, Color::Black);
         let final_score_text: &str = "Final Score: ";
         let game_over_text: &str = "Game over! Press R to restart.";
-        clear_row(0, Color::Black);
         plot_str(final_score_text, 0, 0, header_color_score);
         plot_num(self.score as isize, final_score_text.len(), 0, header_color_score);
         plot_str(game_over_text, 0, 1, header_color_gameover);
@@ -190,7 +189,6 @@ impl SpaceDebrisGame {
     pub fn reset(&mut self) {
         self.player.game_status = GameStatus::GameRunning;
         self.player.clear_current();
-        clear_row(0, Color::Black);
         clear_row(1, Color::Black);
         let mut deleted_debris: Vec<usize, 30> = Vec::<usize, 30>::new();
         for i in 0..self.debris.len() {
