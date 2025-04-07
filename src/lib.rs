@@ -7,33 +7,27 @@ use pc_keyboard::{DecodedKey, KeyCode};
 use pluggable_interrupt_os::vga_buffer::{
     plot, Color, ColorCode, BUFFER_HEIGHT, BUFFER_WIDTH, plot_str, plot_num, clear_row
 };
+// use pluggable_interrupt_os::println;
 
 use core::{
-    clone::Clone,
-    cmp::{Eq, PartialEq},
-    marker::Copy,
-    prelude::rust_2024::derive,
+    char::REPLACEMENT_CHARACTER, clone::Clone, cmp::{Eq, PartialEq}, marker::Copy, prelude::rust_2024::derive
 };
-
-// Level 3 Outline
-// Start with a title screen, featuring a fancy SPACE JUNK title and the three difficulties.
-// Player presses one of 1, 2, or 3 on the keyboard, corresponding to one of the three difficulties.
-// As difficulty goes up, there is more debris and the debris is faster.
-// When the player loses, a game over/high score screen is displayed showing the player's high score for all three
-// difficulties. They can press R to go back to the title screen.
 
 const DEBRIS_COLORS: [Color; 13] = [Color::Blue, Color::Green, Color::Cyan, Color::Red, Color::Magenta,
                                     Color::LightGray, Color::LightBlue, Color::LightGreen, Color::LightCyan,
                                     Color::LightRed, Color::Pink, Color::Yellow, Color::White];
+const CW_SPAWN_RATE: u32 = 8;
+const RMT_SPAWN_RATE: u32 = 6;
+const N_SPAWN_RATE: u32 = 3;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
-pub enum GameStatus {
+enum GameStatus {
     GameRunning,
-    GameOver
+    GameStopped
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
-pub enum Difficulty {
+enum Difficulty {
     Undefined,
     Cakewalk,
     RMT,
@@ -41,7 +35,7 @@ pub enum Difficulty {
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
-pub enum DebrisStatus {
+enum DebrisStatus {
     Normal,
     ScorePoint,
     Destroy
@@ -50,12 +44,13 @@ pub enum DebrisStatus {
 #[derive(Clone, Eq, PartialEq)]
 pub struct SpaceDebrisGame {
     player: Player,
-    debris: Vec<Debris, 30>,
+    debris: Vec<Debris, 50>,
     score: u32,
     cw_high_score: u32,
     rmt_high_score: u32,
     n_high_score: u32,
     spawn_countdown: u32,
+    spawn_rate: u32,
     seed_count: u32,
     difficulty: Difficulty
 }
@@ -78,15 +73,15 @@ pub struct Debris {
     debris_status: DebrisStatus
 }
 
-pub fn safe_add<const LIMIT: usize>(a: usize, b: usize) -> usize {
+fn safe_add<const LIMIT: usize>(a: usize, b: usize) -> usize {
     (a + b).mod_floor(&LIMIT)
 }
 
-pub fn add1<const LIMIT: usize>(value: usize) -> usize {
+fn add1<const LIMIT: usize>(value: usize) -> usize {
     safe_add::<LIMIT>(value, 1)
 }
 
-pub fn sub1<const LIMIT: usize>(value: usize) -> usize {
+fn sub1<const LIMIT: usize>(value: usize) -> usize {
     safe_add::<LIMIT>(value, LIMIT - 1)
 }
 
@@ -99,7 +94,8 @@ impl Default for SpaceDebrisGame {
             cw_high_score: 0,
             rmt_high_score: 0,
             n_high_score: 0,
-            spawn_countdown: 5,
+            spawn_countdown: 0,
+            spawn_rate: 0,
             seed_count: 0,
             difficulty: Difficulty::Undefined
         }
@@ -112,13 +108,13 @@ impl Default for Player {
             col: BUFFER_WIDTH / 4,
             row: BUFFER_HEIGHT / 2,
             dy: 0,
-            game_status: GameStatus::GameRunning
+            game_status: GameStatus::GameStopped
         }
     }
 }
 
 impl Debris {
-    pub fn new(num: u32) -> Self {
+    fn new(num: u32) -> Self {
         let mut rng: Rand32 = Rand32::new(num.into());
         Self {
             col: BUFFER_WIDTH - 1,
@@ -137,13 +133,14 @@ impl SpaceDebrisGame {
         if let Some(event) = self.player.tick() {
             match event {
                 GameStatus::GameRunning => {},
-                GameStatus::GameOver => {
+                GameStatus::GameStopped => {
                     self.player.dy = 0;
-                    self.display_game_over();
+                    self.update_high_score();
+                    self.display_title_screen();
                 }
             }
         }
-        let mut deleted_debris: Vec<usize, 30> = Vec::<usize, 30>::new();
+        let mut deleted_debris: Vec<usize, 50> = Vec::<usize, 50>::new();
         for i in 0..self.debris.len() {
             if let Some(event) = self.debris[i].tick(&mut self.player) {
                 match event {
@@ -161,51 +158,7 @@ impl SpaceDebrisGame {
         self.create_debris();
     }
 
-    pub fn initialize(&mut self) {
-        self.display_score();
-    }
-
-    pub fn display_title_screen(&mut self) {
-        let header_color: ColorCode = ColorCode::new(Color::White, Color::Black);
-        let text: &str = "";
-        plot_str(text, 0, 0, header_color);
-    }
-
-    fn create_debris(&mut self) {
-        self.seed_count += 1;
-        if self.spawn_countdown == 0 {
-            let _ = self.debris.push(Debris::new(self.seed_count));
-            self.spawn_countdown = 5;
-        } else {
-            self.spawn_countdown -= 1;
-        }
-    }
-
-    pub fn key(&mut self, key: DecodedKey) {
-        if self.player.game_status == GameStatus::GameOver {
-            if key == DecodedKey::RawKey(KeyCode::R) || key == DecodedKey::Unicode('r') {
-                self.reset();
-            }
-        }
-        self.player.key(key);
-    }
-
-    fn increment_score(&mut self) {
-        if self.player.game_status != GameStatus::GameOver {
-            self.score += 1;
-            self.display_score();
-        }
-    }
-
-    fn display_score(&self) {
-        let header_color: ColorCode = ColorCode::new(Color::White, Color::Black);
-        let score_text: &str = "Score: ";
-        clear_row(0, Color::Black);
-        plot_str(score_text, 0, 0, header_color);
-        plot_num(self.score as isize, score_text.len(), 0, header_color);
-    }
-
-    fn display_game_over(&self) {
+    pub fn display_title_screen(&self) {
         let header_color_score: ColorCode = ColorCode::new(Color::White, Color::Black);
         let header_color_gameover: ColorCode = ColorCode::new(Color::Red, Color::Black);
         let cw_score_text: &str = "High Score (Cakewalk): ";
@@ -221,13 +174,87 @@ impl SpaceDebrisGame {
         plot_str(game_over_text, 0, 3, header_color_gameover);
     }
 
+    pub fn key(&mut self, key: DecodedKey) {
+        if self.player.game_status == GameStatus::GameStopped {
+            if key == DecodedKey::Unicode('1') {
+                self.difficulty = Difficulty::Cakewalk;
+                self.reset();
+            } else if key == DecodedKey::Unicode('2') {
+                self.difficulty = Difficulty::RMT;
+                self.reset();
+            } else if key == DecodedKey::Unicode('3') {
+                self.difficulty = Difficulty::Nightmare;
+                self.reset();
+            }
+        }
+        self.player.key(key);
+    }
+
+    fn increment_score(&mut self) {
+        if self.player.game_status == GameStatus::GameRunning {
+            self.score += 1;
+            self.display_score();
+        }
+    }
+
+    fn update_high_score(&mut self) {
+        match self.difficulty {
+            Difficulty::Undefined => {},
+            Difficulty::Cakewalk => {
+                if self.score > self.cw_high_score {
+                    self.cw_high_score = self.score;
+                }
+            },
+            Difficulty::RMT => {
+                if self.score > self.rmt_high_score {
+                    self.rmt_high_score = self.score;
+                }
+            },
+            Difficulty::Nightmare => {
+                if self.score > self.n_high_score {
+                    self.n_high_score = self.score;
+                }
+            }
+        }
+    }
+
+    fn display_score(&self) {
+        let header_color: ColorCode = ColorCode::new(Color::White, Color::Black);
+        let mut score_text: &str = "";
+        match self.difficulty {
+            Difficulty::Undefined => {},
+            Difficulty::Cakewalk => score_text = "Score (Cakewalk): ",
+            Difficulty::RMT => score_text = "Score (Road Most Travelled): ",
+            Difficulty::Nightmare => score_text = "Score (Nightmare): "
+        }
+        clear_row(0, Color::Black);
+        plot_str(score_text, 0, 0, header_color);
+        plot_num(self.score as isize, score_text.len(), 0, header_color);
+    }
+
+    fn create_debris(&mut self) {
+        self.seed_count += 1;
+        if self.spawn_countdown == 0 {
+            let _ = self.debris.push(Debris::new(self.seed_count));
+            self.spawn_countdown = self.spawn_rate;
+        } else {
+            self.spawn_countdown -= 1;
+        }
+    }
+
     fn reset(&mut self) {
         self.player.game_status = GameStatus::GameRunning;
+        match self.difficulty {
+            Difficulty::Undefined => {},
+            Difficulty::Cakewalk => self.spawn_rate = CW_SPAWN_RATE,
+            Difficulty::RMT => self.spawn_rate = RMT_SPAWN_RATE,
+            Difficulty::Nightmare => self.spawn_rate = N_SPAWN_RATE
+        }
         self.player.clear_current();
         for i in 0..=3 {
             clear_row(i, Color::Black);
         }
-        let mut deleted_debris: Vec<usize, 30> = Vec::<usize, 30>::new();
+        let mut deleted_debris: Vec<usize, 50> = Vec::<usize, 50>::new();
         for i in 0..self.debris.len() {
             let _ = deleted_debris.push(i);
             self.debris[i].clear_current();
@@ -238,7 +265,7 @@ impl SpaceDebrisGame {
         self.score = 0;
         self.player.row = BUFFER_HEIGHT / 2;
         self.player.col = BUFFER_WIDTH / 4;
-        self.initialize();
+        self.display_score();
     }
 }
 
@@ -247,8 +274,8 @@ impl Player {
         self.clear_current();
         self.update_location();
         self.draw_current();
-        if self.game_status == GameStatus::GameOver {
-            return Some(GameStatus::GameOver);
+        if self.game_status == GameStatus::GameStopped {
+            return Some(GameStatus::GameStopped);
         }
         Some(GameStatus::GameRunning)
     }
@@ -266,7 +293,8 @@ impl Player {
     }
 
     fn collide(&mut self) {
-        self.game_status = GameStatus::GameOver;
+        clear_row(0, Color::Black);
+        self.game_status = GameStatus::GameStopped;
     }
 
     fn draw_current(&self) {

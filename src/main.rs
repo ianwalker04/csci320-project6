@@ -21,7 +21,7 @@ static TICKED: AtomicCell<bool> = AtomicCell::new(false);
 
 fn cpu_loop() -> ! {
     let mut game: SpaceDebrisGame = SpaceDebrisGame::default();
-    game.initialize();
+    game.display_title_screen();
     loop {
         if let Ok(_) = TICKED.compare_exchange(true, false) {
             game.update();
