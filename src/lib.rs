@@ -15,6 +15,13 @@ use core::{
     prelude::rust_2024::derive,
 };
 
+// Level 3 Outline
+// Start with a title screen, featuring a fancy SPACE JUNK title and the three difficulties.
+// Player presses one of 1, 2, or 3 on the keyboard, corresponding to one of the three difficulties.
+// As difficulty goes up, there is more debris and the debris is faster.
+// When the player loses, a game over/high score screen is displayed showing the player's high score for all three
+// difficulties. They can press R to go back to the title screen.
+
 const DEBRIS_COLORS: [Color; 13] = [Color::Blue, Color::Green, Color::Cyan, Color::Red, Color::Magenta,
                                     Color::LightGray, Color::LightBlue, Color::LightGreen, Color::LightCyan,
                                     Color::LightRed, Color::Pink, Color::Yellow, Color::White];
@@ -23,6 +30,14 @@ const DEBRIS_COLORS: [Color; 13] = [Color::Blue, Color::Green, Color::Cyan, Colo
 pub enum GameStatus {
     GameRunning,
     GameOver
+}
+
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub enum Difficulty {
+    Undefined,
+    Cakewalk,
+    RMT,
+    Nightmare
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -37,8 +52,12 @@ pub struct SpaceDebrisGame {
     player: Player,
     debris: Vec<Debris, 30>,
     score: u32,
+    cw_high_score: u32,
+    rmt_high_score: u32,
+    n_high_score: u32,
     spawn_countdown: u32,
-    seed_count: u32
+    seed_count: u32,
+    difficulty: Difficulty
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -77,8 +96,12 @@ impl Default for SpaceDebrisGame {
             player: Player::default(),
             debris: Vec::new(),
             score: 0,
+            cw_high_score: 0,
+            rmt_high_score: 0,
+            n_high_score: 0,
             spawn_countdown: 5,
-            seed_count: 0
+            seed_count: 0,
+            difficulty: Difficulty::Undefined
         }
     }
 }
@@ -142,7 +165,13 @@ impl SpaceDebrisGame {
         self.display_score();
     }
 
-    pub fn create_debris(&mut self) {
+    pub fn display_title_screen(&mut self) {
+        let header_color: ColorCode = ColorCode::new(Color::White, Color::Black);
+        let text: &str = "";
+        plot_str(text, 0, 0, header_color);
+    }
+
+    fn create_debris(&mut self) {
         self.seed_count += 1;
         if self.spawn_countdown == 0 {
             let _ = self.debris.push(Debris::new(self.seed_count));
@@ -161,14 +190,14 @@ impl SpaceDebrisGame {
         self.player.key(key);
     }
 
-    pub fn increment_score(&mut self) {
+    fn increment_score(&mut self) {
         if self.player.game_status != GameStatus::GameOver {
             self.score += 1;
             self.display_score();
         }
     }
 
-    pub fn display_score(&self) {
+    fn display_score(&self) {
         let header_color: ColorCode = ColorCode::new(Color::White, Color::Black);
         let score_text: &str = "Score: ";
         clear_row(0, Color::Black);
@@ -176,20 +205,28 @@ impl SpaceDebrisGame {
         plot_num(self.score as isize, score_text.len(), 0, header_color);
     }
 
-    pub fn display_game_over(&self) {
+    fn display_game_over(&self) {
         let header_color_score: ColorCode = ColorCode::new(Color::White, Color::Black);
         let header_color_gameover: ColorCode = ColorCode::new(Color::Red, Color::Black);
-        let final_score_text: &str = "Final Score: ";
+        let cw_score_text: &str = "High Score (Cakewalk): ";
+        let rmt_score_text: &str = "High Score (Road Most Travelled): ";
+        let n_score_text: &str = "High Score (Nightmare): ";
         let game_over_text: &str = "Game over! Press R to restart.";
-        plot_str(final_score_text, 0, 0, header_color_score);
-        plot_num(self.score as isize, final_score_text.len(), 0, header_color_score);
-        plot_str(game_over_text, 0, 1, header_color_gameover);
+        plot_str(cw_score_text, 0, 0, header_color_score);
+        plot_num(self.cw_high_score as isize, cw_score_text.len(), 0, header_color_score);
+        plot_str(rmt_score_text, 0, 1, header_color_score);
+        plot_num(self.rmt_high_score as isize, rmt_score_text.len(), 1, header_color_score);
+        plot_str(n_score_text, 0, 2, header_color_score);
+        plot_num(self.n_high_score as isize, n_score_text.len(), 2, header_color_score);
+        plot_str(game_over_text, 0, 3, header_color_gameover);
     }
 
-    pub fn reset(&mut self) {
+    fn reset(&mut self) {
         self.player.game_status = GameStatus::GameRunning;
         self.player.clear_current();
-        clear_row(1, Color::Black);
+        for i in 0..=3 {
+            clear_row(i, Color::Black);
+        }
         let mut deleted_debris: Vec<usize, 30> = Vec::<usize, 30>::new();
         for i in 0..self.debris.len() {
             let _ = deleted_debris.push(i);
@@ -206,14 +243,14 @@ impl SpaceDebrisGame {
 }
 
 impl Player {
-    pub fn tick(&mut self) -> Option<GameStatus> {
+    fn tick(&mut self) -> Option<GameStatus> {
         self.clear_current();
         self.update_location();
         self.draw_current();
         if self.game_status == GameStatus::GameOver {
             return Some(GameStatus::GameOver);
         }
-        return Some(GameStatus::GameRunning);
+        Some(GameStatus::GameRunning)
     }
 
     fn clear_current(&self) {
@@ -240,17 +277,10 @@ impl Player {
                 self.row,
                 ColorCode::new(Color::White, Color::Black),
             );
-        } else {
-            plot(
-                '*',
-                self.col,
-                self.row,
-                ColorCode::new(Color::White, Color::Black),
-            );
         }
     }
 
-    pub fn key(&mut self, key: DecodedKey) {
+    fn key(&mut self, key: DecodedKey) {
         if let DecodedKey::RawKey(code) = key {
             self.handle_raw(code);
         }
@@ -272,21 +302,25 @@ impl Player {
 }
 
 impl Debris {
-    pub fn tick(&mut self, player: &mut Player) -> Option<DebrisStatus> {
-        self.clear_current();
-        self.update_location();
-        if self.col == player.col && self.row == player.row {
-            player.collide();
-        }
-        self.draw_current();
-        if self.col == 18 {
-            return Some(DebrisStatus::ScorePoint);
-        }
-        if self.col == 0 {
+    fn tick(&mut self, player: &mut Player) -> Option<DebrisStatus> {
+        if player.game_status == GameStatus::GameRunning {
             self.clear_current();
-            return Some(DebrisStatus::Destroy);
+            self.update_location();
+            if self.col == player.col && self.row == player.row {
+                player.collide();
+            }
+            self.draw_current(*player);
+            if self.col == 18 {
+                return Some(DebrisStatus::ScorePoint);
+            }
+            if self.col == 0 {
+                self.clear_current();
+                return Some(DebrisStatus::Destroy);
+            }
+            return Some(DebrisStatus::Normal);
         }
-        return Some(DebrisStatus::Normal);
+        self.clear_current();
+        Some(DebrisStatus::Destroy)
     }
 
     fn clear_current(&self) {
@@ -302,12 +336,14 @@ impl Debris {
         }
     }
 
-    fn draw_current(&self) {
-        plot(
-            '*',
-            self.col,
-            self.row,
-            ColorCode::new(self.color, Color::Black),
-        );
+    fn draw_current(&self, player: Player) {
+        if player.game_status == GameStatus::GameRunning {
+            plot(
+                '*',
+                self.col,
+                self.row,
+                ColorCode::new(self.color, Color::Black),
+            );
+        }
     }
 }
