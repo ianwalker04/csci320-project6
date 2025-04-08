@@ -7,10 +7,9 @@ use pc_keyboard::{DecodedKey, KeyCode};
 use pluggable_interrupt_os::vga_buffer::{
     plot, Color, ColorCode, BUFFER_HEIGHT, BUFFER_WIDTH, plot_str, plot_num, clear_row
 };
-// use pluggable_interrupt_os::println;
 
 use core::{
-    char::REPLACEMENT_CHARACTER, clone::Clone, cmp::{Eq, PartialEq}, marker::Copy, prelude::rust_2024::derive
+    clone::Clone, cmp::{Eq, PartialEq}, marker::Copy, prelude::rust_2024::derive
 };
 
 const DEBRIS_COLORS: [Color; 13] = [Color::Blue, Color::Green, Color::Cyan, Color::Red, Color::Magenta,
@@ -19,6 +18,12 @@ const DEBRIS_COLORS: [Color; 13] = [Color::Blue, Color::Green, Color::Cyan, Colo
 const CW_SPAWN_RATE: u32 = 8;
 const RMT_SPAWN_RATE: u32 = 6;
 const N_SPAWN_RATE: u32 = 3;
+const CW_LOWER_SPEED: u32 = 3;
+const CW_UPPER_SPEED: u32 = 7;
+const RMT_LOWER_SPEED: u32 = 2;
+const RMT_UPPER_SPEED: u32 = 5;
+const N_LOWER_SPEED: u32 = 1;
+const N_UPPER_SPEED: u32 = 2;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 enum GameStatus {
@@ -114,12 +119,12 @@ impl Default for Player {
 }
 
 impl Debris {
-    fn new(num: u32) -> Self {
+    fn new(num: u32, lower_speed: u32, upper_speed: u32) -> Self {
         let mut rng: Rand32 = Rand32::new(num.into());
         Self {
             col: BUFFER_WIDTH - 1,
             row: rng.rand_range(2..BUFFER_HEIGHT as u32) as usize,
-            dx: rng.rand_range(1..5) as usize,
+            dx: rng.rand_range(lower_speed..upper_speed) as usize,
             dx_tick: 0,
             color: DEBRIS_COLORS[rng.rand_range(0..13) as usize],
             debris_status: DebrisStatus::Normal
@@ -159,19 +164,23 @@ impl SpaceDebrisGame {
     }
 
     pub fn display_title_screen(&self) {
-        let header_color_score: ColorCode = ColorCode::new(Color::White, Color::Black);
-        let header_color_gameover: ColorCode = ColorCode::new(Color::Red, Color::Black);
+        let color_white: ColorCode = ColorCode::new(Color::White, Color::Black);
+        let color_red: ColorCode = ColorCode::new(Color::LightRed, Color::Black);
+        let title_text: &str = "SPACE JUNK";
         let cw_score_text: &str = "High Score (Cakewalk): ";
         let rmt_score_text: &str = "High Score (Road Most Travelled): ";
         let n_score_text: &str = "High Score (Nightmare): ";
-        let game_over_text: &str = "Game over! Press R to restart.";
-        plot_str(cw_score_text, 0, 0, header_color_score);
-        plot_num(self.cw_high_score as isize, cw_score_text.len(), 0, header_color_score);
-        plot_str(rmt_score_text, 0, 1, header_color_score);
-        plot_num(self.rmt_high_score as isize, rmt_score_text.len(), 1, header_color_score);
-        plot_str(n_score_text, 0, 2, header_color_score);
-        plot_num(self.n_high_score as isize, n_score_text.len(), 2, header_color_score);
-        plot_str(game_over_text, 0, 3, header_color_gameover);
+        let control_text: &str = "Controls: Up/Down Arrow Keys";
+        let difficulty_text: &str = "Press 1 to Play Cakewalk, 2 for Road Most Travelled, 3 for Nightmare";
+        plot_str(title_text, BUFFER_WIDTH / 2 - 5, BUFFER_HEIGHT / 2 - 4, color_red);
+        plot_str(cw_score_text, BUFFER_WIDTH / 2 - 12, BUFFER_HEIGHT / 2 - 2, color_white);
+        plot_num(self.cw_high_score as isize, cw_score_text.len() + 28, BUFFER_HEIGHT / 2 - 2, color_white);
+        plot_str(rmt_score_text, BUFFER_WIDTH / 2 - 18, BUFFER_HEIGHT / 2 - 1, color_white);
+        plot_num(self.rmt_high_score as isize, rmt_score_text.len() + 22, BUFFER_HEIGHT / 2 - 1, color_white);
+        plot_str(n_score_text, BUFFER_WIDTH / 2 - 12, BUFFER_HEIGHT / 2, color_white);
+        plot_num(self.n_high_score as isize, n_score_text.len() + 28, BUFFER_HEIGHT / 2, color_white);
+        plot_str(control_text, BUFFER_WIDTH / 2 - 13, BUFFER_HEIGHT / 2 + 2, color_white);
+        plot_str(difficulty_text, BUFFER_WIDTH / 2 - 34, BUFFER_HEIGHT / 2 + 3, color_white);
     }
 
     pub fn key(&mut self, key: DecodedKey) {
@@ -235,7 +244,24 @@ impl SpaceDebrisGame {
     fn create_debris(&mut self) {
         self.seed_count += 1;
         if self.spawn_countdown == 0 {
-            let _ = self.debris.push(Debris::new(self.seed_count));
+            let mut lower_speed: u32 = 1;
+            let mut upper_speed: u32 = 5;
+            match self.difficulty {
+                Difficulty::Undefined => {},
+                Difficulty::Cakewalk => {
+                    lower_speed = CW_LOWER_SPEED;
+                    upper_speed = CW_UPPER_SPEED;
+                },
+                Difficulty::RMT => {
+                    lower_speed = RMT_LOWER_SPEED;
+                    upper_speed = RMT_UPPER_SPEED;
+                },
+                Difficulty::Nightmare => {
+                    lower_speed = N_LOWER_SPEED;
+                    upper_speed = N_UPPER_SPEED;
+                }
+            }
+            let _ = self.debris.push(Debris::new(self.seed_count, lower_speed, upper_speed));
             self.spawn_countdown = self.spawn_rate;
         } else {
             self.spawn_countdown -= 1;
@@ -243,6 +269,9 @@ impl SpaceDebrisGame {
     }
 
     fn reset(&mut self) {
+        for i in 8..=15 {
+            clear_row(i, Color::Black);
+        }
         self.player.game_status = GameStatus::GameRunning;
         match self.difficulty {
             Difficulty::Undefined => {},
@@ -251,9 +280,6 @@ impl SpaceDebrisGame {
             Difficulty::Nightmare => self.spawn_rate = N_SPAWN_RATE
         }
         self.player.clear_current();
-        for i in 0..=3 {
-            clear_row(i, Color::Black);
-        }
         let mut deleted_debris: Vec<usize, 50> = Vec::<usize, 50>::new();
         for i in 0..self.debris.len() {
             let _ = deleted_debris.push(i);
